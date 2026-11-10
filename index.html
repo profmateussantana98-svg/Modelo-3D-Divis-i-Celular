@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizador 3D - Mitose e Meiose</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f8fafc;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        #webgl-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .ui-layer {
+            position: relative;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .pointer-auto {
+            pointer-events: auto;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .drawer-slide {
+            transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s ease;
+        }
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.5);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="h-full w-full flex flex-col justify-between">
+
+    <!-- WebGL Canvas Container -->
+    <div id="webgl-container"></div>
+
+    <!-- UI Overlay Layer -->
+    <div class="ui-layer h-full w-full flex flex-col justify-between p-3 sm:p-5">
+        
+        <!-- Top Bar: App Title, Mode Tabs & Timeline Selector -->
+        <header class="w-full flex flex-col lg:flex-row items-center justify-between gap-3">
+            
+            <!-- App Title & Info Drawer Toggle -->
+            <div class="flex items-center gap-2 sm:gap-3 w-full lg:w-auto justify-between lg:justify-start">
+                <div class="glass-panel px-4 py-2.5 rounded-2xl pointer-auto flex items-center gap-3 shadow-lg">
+                    <div id="app-icon-badge" class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-500 to-indigo-500 flex items-center justify-center font-bold text-base text-white shadow-md">
+                        <i class="fa-solid fa-dna"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-sm sm:text-base font-bold tracking-wide text-white leading-tight">Ciclo Celular 3D</h1>
+                        <p id="app-subtitle" class="text-[11px] text-slate-400">Intérfase, Mitose e Meiose</p>
+                    </div>
+                </div>
+
+                <!-- Info Drawer Toggle Button -->
+                <button id="toggle-drawer-btn" class="glass-panel px-3.5 py-2.5 rounded-2xl pointer-auto flex items-center gap-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800/80 transition-all shadow-lg active:scale-95">
+                    <i class="fa-solid fa-circle-info text-blue-400 text-sm"></i>
+                    <span class="hidden sm:inline">Explicações da Fase</span>
+                </button>
+            </div>
+
+            <!-- Main Mode Tabs: MITOSE vs MEIOSE -->
+            <div class="glass-panel p-1.5 rounded-2xl pointer-auto flex items-center gap-1 shadow-xl">
+                <button id="tab-mitosis" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-300 bg-blue-600 text-white shadow-md">
+                    <i class="fa-solid fa-clone text-xs"></i>
+                    <span>Mitose (2n → 2n)</span>
+                </button>
+                <button id="tab-meiosis" class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-300 text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-arrows-split-up-and-left text-xs"></i>
+                    <span>Meiose (2n → 4n)</span>
+                </button>
+            </div>
+
+            <!-- Stepper Track for current mode -->
+            <div class="glass-panel p-1.5 rounded-2xl pointer-auto flex items-center gap-1 overflow-x-auto max-w-full shadow-lg">
+                <div id="phase-buttons-container" class="flex items-center gap-1"></div>
+            </div>
+        </header>
+
+        <!-- Retractable Floating Info Drawer (Left Side) -->
+        <div id="info-drawer" class="drawer-slide pointer-auto fixed left-4 top-20 bottom-24 w-80 sm:w-96 glass-panel p-5 rounded-3xl flex flex-col shadow-2xl z-50 transform -translate-x-[115%] opacity-0">
+            <!-- Drawer Header -->
+            <div class="flex items-center justify-between mb-3 border-b border-slate-700/60 pb-3">
+                <div class="flex items-center gap-2">
+                    <span id="phase-category" class="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                        Intérfase
+                    </span>
+                    <span id="phase-step-indicator" class="text-xs text-slate-400 font-mono">Etapa 1 / 8</span>
+                </div>
+                <button id="close-drawer-btn" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Phase Title & Subtitle -->
+            <h2 id="phase-title" class="text-xl font-extrabold text-white mb-1">Fase G1</h2>
+            <h3 id="phase-subtitle" class="text-xs font-medium text-slate-400 mb-3 uppercase tracking-wider">Crescimento Celular Inicial</h3>
+
+            <!-- Description List -->
+            <div class="overflow-y-auto pr-1 space-y-2.5 flex-1 text-xs sm:text-sm text-slate-300" id="phase-description">
+            </div>
+
+            <!-- Key Visual Highlight Tip -->
+            <div class="mt-3 pt-3 border-t border-slate-700/50 flex items-start gap-2.5 text-xs text-amber-300/90 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20">
+                <i class="fa-solid fa-lightbulb text-amber-400 mt-0.5 text-sm shrink-0"></i>
+                <span id="phase-highlight-text">Observe os detalhes do modelo 3D.</span>
+            </div>
+        </div>
+
+        <!-- Right Side Camera Controls -->
+        <div class="glass-panel p-2 rounded-2xl pointer-auto flex flex-col gap-2 shadow-xl self-end mb-auto mt-4">
+            <button id="reset-cam-btn" title="Resetar Câmera" class="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all">
+                <i class="fa-solid fa-camera-rotate"></i>
+            </button>
+            <button id="toggle-orbit-btn" title="Alternar Rotação da Câmera" class="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all">
+                <i class="fa-solid fa-arrows-spin"></i>
+            </button>
+        </div>
+
+        <!-- Bottom Controls Bar -->
+        <footer class="w-full flex flex-col sm:flex-row items-center justify-between gap-3">
+            
+            <div class="hidden md:flex items-center gap-2 text-xs text-slate-400 glass-panel px-3.5 py-2 rounded-xl">
+                <span>Navegue usando as setas:</span>
+                <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-slate-200">←</kbd>
+                <kbd class="px-1.5 py-0.5 bg-slate-800 border border-slate-600 rounded text-slate-200">→</kbd>
+            </div>
+
+            <!-- Playback Controls -->
+            <div class="glass-panel p-1.5 rounded-2xl pointer-auto flex items-center gap-2.5 shadow-xl mx-auto sm:mx-0">
+                <button id="btn-prev" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:hover:bg-slate-800">
+                    <i class="fa-solid fa-chevron-left text-base"></i>
+                </button>
+
+                <button id="btn-play" class="px-4 h-10 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-semibold flex items-center gap-2 transition-all shadow-lg">
+                    <i id="play-icon" class="fa-solid fa-play text-xs"></i>
+                    <span id="play-text" class="text-xs sm:text-sm">Auto Reproduzir</span>
+                </button>
+
+                <button id="btn-next" class="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-white flex items-center justify-center transition-all disabled:opacity-40 disabled:hover:bg-slate-800">
+                    <i class="fa-solid fa-chevron-right text-base"></i>
+                </button>
+            </div>
+            
+            <!-- Progress Bar Info -->
+            <div class="w-full sm:w-44 glass-panel p-2.5 rounded-xl pointer-auto flex flex-col gap-1">
+                <div class="flex justify-between text-[11px] font-medium text-slate-300">
+                    <span>Progresso da Fase</span>
+                    <span id="progress-percent" class="text-blue-400 font-bold">0%</span>
+                </div>
+                <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div id="progress-bar-fill" class="bg-gradient-to-r from-blue-500 to-purple-500 h-full w-0 transition-all duration-500 rounded-full"></div>
+                </div>
+            </div>
+
+        </footer>
+
+    </div>
+
+    <!-- JavaScript Application Code -->
+    <script>
+        const MITOSIS_PHASES = [
+            {
+                id: 'g1',
+                name: 'Fase G1',
+                subtitle: 'Crescimento Celular & DNA Regular (2n)',
+                category: 'Intérfase',
+                bulletPoints: [
+                    'Intensa síntese de proteínas e metabolismo ativo.',
+                    '**DNA em quantidade regular (2n)** descondensado no núcleo.'
+                ],
+                highlight: 'Fita de cromatina em densidade normal pré-duplicação.',
+                progress: 12
+            },
+            {
+                id: 's',
+                name: 'Fase S',
+                subtitle: 'Duplicação do DNA (4n cromátides)',
+                category: 'Intérfase',
+                bulletPoints: [
+                    '**Duplicação exata do material genético**.',
+                    'Duplicação dos centrossomos.'
+                ],
+                highlight: 'Densidade da cromatina duplicada visível no interior do núcleo.',
+                progress: 25
+            },
+            {
+                id: 'g2',
+                name: 'Fase G2',
+                subtitle: 'Preparação Final para a Divisão',
+                category: 'Intérfase',
+                bulletPoints: [
+                    'Síntese de tubulina para o fuso mitótico.',
+                    'Checagem final do DNA duplicado.'
+                ],
+                highlight: 'Célula pronta com dois centrossomos e volume ajustado.',
+                progress: 37
+            },
+            {
+                id: 'profase',
+                name: 'Prófase',
+                subtitle: 'Fragmentação da Carioteca',
+                category: 'Mitose',
+                bulletPoints: [
+                    '**A carioteca se desfaz** em pequenas vesículas.',
+                    'Condensação inicial dos cromossomos duplos ("X").'
+                ],
+                highlight: 'Envoltório nuclear fragmentando-se na cena 3D.',
+                progress: 50
+            },
+            {
+                id: 'metafase',
+                name: 'Metáfase',
+                subtitle: 'Placa Equatorial Individual',
+                category: 'Mitose',
+                bulletPoints: [
+                    'Cromossomos no grau máximo de condensação.',
+                    'Alinhamento individual na placa metafásica central.'
+                ],
+                highlight: 'Alinhamento no centro celular ligando-se ao fuso.',
+                progress: 62
+            },
+            {
+                id: 'anafase',
+                name: 'Anáfase',
+                subtitle: 'Separação das Cromátides-Irmãs',
+                category: 'Mitose',
+                bulletPoints: [
+                    'Clivagem dos centrômeros.',
+                    '**Cromátides-irmãs em formato de "V"** são puxadas para os polos opostos.'
+                ],
+                highlight: 'Cromátides individuais (em V) migrando aos dois polos.',
+                progress: 75
+            },
+            {
+                id: 'telofase',
+                name: 'Telófase',
+                subtitle: 'Reorganização dos 2 Núcleos',
+                category: 'Mitose',
+                bulletPoints: [
+                    'Reconstituição das cariotecas ao redor dos polos.',
+                    'Descondensação progressiva dos cromossomos.'
+                ],
+                highlight: 'Reconstrução dos novos núcleos celulares.',
+                progress: 87
+            },
+            {
+                id: 'citocinese',
+                name: 'Citocinese',
+                subtitle: 'Divisão Citoplasmática',
+                category: 'Mitose',
+                bulletPoints: [
+                    'Clivagem física do citoplasma.',
+                    'Formação de **2 células-filhas idênticas (2n)**.'
+                ],
+                highlight: 'Duas células formadas e independentes.',
+                progress: 100
+            }
+        ];
+
+        const MEIOSIS_PHASES = [
+            {
+                id: 'profase1',
+                name: 'Prófase I',
+                subtitle: 'Pareamento & Crossing-Over',
+                category: 'Meiose I',
+                bulletPoints: [
+                    '**Crossing-over (Permutação)**: Troca de segmentos de DNA entre homólogos.',
+                    'A carioteca se desfaz.'
+                ],
+                highlight: 'Homólogos pareados trocando segmentos coloridos.',
+                progress: 11
+            },
+            {
+                id: 'metafase1',
+                name: 'Metáfase I',
+                subtitle: 'Placa Equatorial Dupla',
+                category: 'Meiose I',
+                bulletPoints: [
+                    'Cromossomos homólogos alinham-se em **pares duplos** no centro.'
+                ],
+                highlight: 'Homólogos lado a lado na placa metafásica.',
+                progress: 22
+            },
+            {
+                id: 'anafase1',
+                name: 'Anáfase I',
+                subtitle: 'Separação dos Homólogos Inteiros',
+                category: 'Meiose I',
+                bulletPoints: [
+                    '**Separação dos cromossomos homólogos inteiros em "X"**.',
+                    'Centrômeros não se dividem nesta etapa.'
+                ],
+                highlight: 'Cromossomos duplos (X) inteiros puxados aos polos.',
+                progress: 33
+            },
+            {
+                id: 'telofase1',
+                name: 'Telófase I / Intercinese',
+                subtitle: 'Cromossomos Duplos nos Novos Núcleos',
+                category: 'Meiose I',
+                bulletPoints: [
+                    'Formação de 2 células intermediárias haploides (n).',
+                    '**Cromossomos duplos visíveis** dentro de cada um dos novos núcleos.'
+                ],
+                highlight: 'Cromossomos duplos agrupados no interior dos 2 novos núcleos.',
+                progress: 44
+            },
+            {
+                id: 'profase2',
+                name: 'Prófase II',
+                subtitle: 'Início da Segunda Divisão',
+                category: 'Meiose II',
+                bulletPoints: [
+                    'Ocorre simultaneamente nas duas células intermediárias.',
+                    'A carioteca fragmenta-se novamente.'
+                ],
+                highlight: 'Duas células paralelas em prófase II.',
+                progress: 55
+            },
+            {
+                id: 'metafase2',
+                name: 'Metáfase II',
+                subtitle: 'Alinhamento Individual Duplo',
+                category: 'Meiose II',
+                bulletPoints: [
+                    'Alinhamento individual dos cromossomos no centro de cada uma das 2 células.'
+                ],
+                highlight: 'Placa equatorial em ambas as células.',
+                progress: 66
+            },
+            {
+                id: 'anafase2',
+                name: 'Anáfase II',
+                subtitle: 'Separação das Cromátides Recombinadas',
+                category: 'Meiose II',
+                bulletPoints: [
+                    'Clivagem dos centrômeros.',
+                    '**Separação das cromátides-irmãs recombinadas em "V"** para os polos.'
+                ],
+                highlight: 'Cromátides em formato de "V" puxadas em ambas as células.',
+                progress: 77
+            },
+            {
+                id: 'telofase2',
+                name: 'Telófase II',
+                subtitle: 'Formação dos 4 Núcleos Haploides',
+                category: 'Meiose II',
+                bulletPoints: [
+                    'Reorganização dos 4 núcleos ao redor dos cromossomos simples.'
+                ],
+                highlight: '4 novos núcleos contendo cromossomos simples.',
+                progress: 88
+            },
+            {
+                id: 'citocinese2',
+                name: 'Citocinese II',
+                subtitle: '4 Células-Filhas Únicas (n)',
+                category: 'Meiose II',
+                bulletPoints: [
+                    'Origem a **4 células-filhas haploides (n)**.',
+                    '**Cromossomos simples claramente visíveis** dentro de cada célula.'
+                ],
+                highlight: '4 células haploides geneticamente distintas formadas.',
+                progress: 100
+            }
+        ];
+
+        let currentMode = 'mitosis';
+        let currentPhaseIndex = 0;
+        let isAutoPlaying = false;
+        let autoPlayTimer = null;
+        let drawerOpen = false;
+
+        // Three.js Core Variables
+        let scene, camera, renderer, controls;
+        let cellGroup;
+
+        // Objects
+        let membrane1, membrane2, daughterMembranes = [];
+        let envelope1, envelope2, fragEnvelopeGroup;
+        let chromatinGroup;
+        let centrosomeGroup;
+        let activeChromosomeContainer;
+
+        const COLOR_BLUE = 0x3b82f6;
+        const COLOR_RED = 0xef4444;
+        const COLOR_PURPLE = 0xa855f7;
+
+        function init3D() {
+            const container = document.getElementById('webgl-container');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x090d16, 0.02);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 24);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            const dir1 = new THREE.DirectionalLight(0x38bdf8, 1.2);
+            dir1.position.set(10, 15, 10);
+            scene.add(dir1);
+
+            const dir2 = new THREE.DirectionalLight(0xec4899, 0.8);
+            dir2.position.set(-10, -10, -10);
+            scene.add(dir2);
+
+            cellGroup = new THREE.Group();
+            scene.add(cellGroup);
+
+            activeChromosomeContainer = new THREE.Group();
+            cellGroup.add(activeChromosomeContainer);
+
+            buildBaseCellElements();
+            window.addEventListener('resize', onWindowResize);
+
+            updatePhase3D();
+            animate();
+        }
+
+        function buildBaseCellElements() {
+            // Main Membrane 1
+            const sphereGeom = new THREE.SphereGeometry(4.2, 48, 48);
+            const memMat = new THREE.MeshPhysicalMaterial({
+                color: 0x38bdf8,
+                transparent: true,
+                opacity: 0.2,
+                roughness: 0.1,
+                transmission: 0.6,
+                side: THREE.DoubleSide
+            });
+
+            membrane1 = new THREE.Mesh(sphereGeom, memMat);
+            cellGroup.add(membrane1);
+
+            // Secondary Membrane
+            membrane2 = new THREE.Mesh(sphereGeom, memMat.clone());
+            membrane2.visible = false;
+            cellGroup.add(membrane2);
+
+            // 4 Daughter Cell Membranes for Citocinese II
+            for(let i=0; i<4; i++) {
+                const m = new THREE.Mesh(sphereGeom, memMat.clone());
+                m.visible = false;
+                daughterMembranes.push(m);
+                cellGroup.add(m);
+            }
+
+            // Nucleus Envelope
+            const envGeom = new THREE.SphereGeometry(2.3, 36, 36);
+            const envMat = new THREE.MeshStandardMaterial({ color: COLOR_PURPLE, transparent: true, opacity: 0.35, wireframe: true });
+            envelope1 = new THREE.Mesh(envGeom, envMat);
+            cellGroup.add(envelope1);
+
+            envelope2 = new THREE.Mesh(envGeom, envMat.clone());
+            envelope2.visible = false;
+            cellGroup.add(envelope2);
+
+            // Fragmented envelope
+            fragEnvelopeGroup = new THREE.Group();
+            const fragMat = new THREE.MeshStandardMaterial({ color: COLOR_PURPLE, transparent: true, opacity: 0.65, side: THREE.DoubleSide });
+            for(let i=0; i<35; i++) {
+                const fg = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.35), fragMat);
+                const r = 2.3;
+                const u = Math.random(), v = Math.random();
+                const theta = u * 2 * Math.PI, phi = Math.acos(2 * v - 1);
+                fg.position.set(r * Math.sin(phi)*Math.cos(theta), r * Math.sin(phi)*Math.sin(theta), r * Math.cos(phi));
+                fragEnvelopeGroup.add(fg);
+            }
+            fragEnvelopeGroup.visible = false;
+            cellGroup.add(fragEnvelopeGroup);
+
+            // Chromatin Tangled Group
+            chromatinGroup = new THREE.Group();
+            cellGroup.add(chromatinGroup);
+
+            // Centrosomes
+            centrosomeGroup = new THREE.Group();
+            const centGeom = new THREE.CylinderGeometry(0.12, 0.12, 0.4, 12);
+            const centMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.2 });
+            const c1 = new THREE.Mesh(centGeom, centMat); c1.name = "c1"; c1.position.set(-0.3, 2.5, 0);
+            const c2 = new THREE.Mesh(centGeom, centMat); c2.name = "c2"; c2.position.set(0.3, 2.5, 0);
+            centrosomeGroup.add(c1); centrosomeGroup.add(c2);
+            cellGroup.add(centrosomeGroup);
+        }
+
+        function createChromatinNetwork(densityFactor = 1.0) {
+            // Rebuilds chromatin inside nucleus
+            while(chromatinGroup.children.length > 0) chromatinGroup.remove(chromatinGroup.children[0]);
+
+            const strands = Math.floor(8 * densityFactor);
+            for(let i=0; i<strands; i++) {
+                const pts = [];
+                for(let j=0; j<6; j++) pts.push(new THREE.Vector3((Math.random()-0.5)*2.4, (Math.random()-0.5)*2.4, (Math.random()-0.5)*2.4));
+                const crv = new THREE.CatmullRomCurve3(pts);
+                const g = new THREE.TubeGeometry(crv, 24, 0.04, 8, false);
+                const m = new THREE.MeshStandardMaterial({ color: i%2===0 ? COLOR_BLUE : COLOR_RED });
+                chromatinGroup.add(new THREE.Mesh(g, m));
+            }
+        }
+
+        // Helper to construct Chromosomes
+        function createDoubleChromosome(color1, color2) {
+            const grp = new THREE.Group();
+            
+            const createArm = (col, rot) => {
+                const aGrp = new THREE.Group();
+                aGrp.rotation.z = rot;
+                const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.3 });
+                const top = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.9, 14), mat); top.position.y = 0.45;
+                const bot = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.12, 0.9, 14), mat); bot.position.y = -0.45;
+                aGrp.add(top); aGrp.add(bot);
+                return aGrp;
+            };
+
+            grp.add(createArm(color1, 0.35));
+            grp.add(createArm(color2, -0.35));
+            
+            const cent = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            grp.add(cent);
+            grp.scale.set(0.85, 0.85, 0.85);
+            return grp;
+        }
+
+        function createSingleChromatidV(color, dir = 1) {
+            const grp = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
+            
+            const arm1 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.9, 14), mat);
+            arm1.position.set(-0.22, -dir * 0.45, 0); arm1.rotation.z = dir * 0.4;
+
+            const arm2 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.9, 14), mat);
+            arm2.position.set(0.22, -dir * 0.45, 0); arm2.rotation.z = -dir * 0.4;
+
+            const cent = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            grp.add(arm1); grp.add(arm2); grp.add(cent);
+            grp.scale.set(0.85, 0.85, 0.85);
+            return grp;
+        }
+
+        // Dynamic Phase Rendering
+        function updatePhase3D() {
+            if (!cellGroup || !activeChromosomeContainer) return;
+            const activeList = currentMode === 'mitosis' ? MITOSIS_PHASES : MEIOSIS_PHASES;
+            const phase = activeList[currentPhaseIndex];
+
+            // Reset visibilities
+            membrane1.visible = true; membrane1.position.set(0,0,0); membrane1.scale.set(1,1,1);
+            membrane2.visible = false;
+            daughterMembranes.forEach(m => m.visible = false);
+            envelope1.visible = false; envelope1.position.set(0,0,0); envelope1.scale.set(1,1,1);
+            envelope2.visible = false;
+            fragEnvelopeGroup.visible = false;
+            chromatinGroup.visible = false;
+
+            while(activeChromosomeContainer.children.length > 0) {
+                activeChromosomeContainer.remove(activeChromosomeContainer.children[0]);
+            }
+
+            if(currentMode === 'mitosis') {
+                switch(phase.id) {
+                    case 'g1':
+                        envelope1.visible = true;
+                        chromatinGroup.visible = true;
+                        createChromatinNetwork(1.0); // Regular density
+                        break;
+                    case 's':
+                        envelope1.visible = true;
+                        chromatinGroup.visible = true;
+                        createChromatinNetwork(2.2); // Duplicated density
+                        break;
+                    case 'g2':
+                        envelope1.visible = true;
+                        chromatinGroup.visible = true;
+                        createChromatinNetwork(2.5);
+                        break;
+                    case 'profase':
+                        fragEnvelopeGroup.visible = true;
+                        [-1.5, -0.5, 0.5, 1.5].forEach((x, i) => {
+                            const c = createDoubleChromosome(i%2===0?COLOR_BLUE:COLOR_RED, i%2===0?COLOR_BLUE:COLOR_RED);
+                            c.position.set(x*1.2, Math.sin(i)*0.8, 0);
+                            activeChromosomeContainer.add(c);
+                        });
+                        break;
+                    case 'metafase':
+                        [-1.8, -0.6, 0.6, 1.8].forEach((x, i) => {
+                            const c = createDoubleChromosome(i%2===0?COLOR_BLUE:COLOR_RED, i%2===0?COLOR_BLUE:COLOR_RED);
+                            c.position.set(x, 0, 0);
+                            activeChromosomeContainer.add(c);
+                        });
+                        break;
+                    case 'anafase':
+                        // ANAPHASE MITOSE: Single chromatids in "V" moving to poles
+                        [-1.8, -0.6, 0.6, 1.8].forEach((x, i) => {
+                            const col = i%2===0 ? COLOR_BLUE : COLOR_RED;
+                            const topV = createSingleChromatidV(col, 1); topV.position.set(x, 2.2, 0);
+                            const botV = createSingleChromatidV(col, -1); botV.position.set(x, -2.2, 0);
+                            activeChromosomeContainer.add(topV); activeChromosomeContainer.add(botV);
+                        });
+                        break;
+                    case 'telofase':
+                        envelope1.visible = true; envelope1.position.set(0, 2.5, 0); envelope1.scale.set(0.7,0.7,0.7);
+                        envelope2.visible = true; envelope2.position.set(0, -2.5, 0); envelope2.scale.set(0.7,0.7,0.7);
+                        [-1.0, 1.0].forEach((x, i) => {
+                            const cTop = createSingleChromatidV(i===0?COLOR_BLUE:COLOR_RED, 1); cTop.position.set(x, 2.5, 0);
+                            const cBot = createSingleChromatidV(i===0?COLOR_BLUE:COLOR_RED, -1); cBot.position.set(x, -2.5, 0);
+                            activeChromosomeContainer.add(cTop); activeChromosomeContainer.add(cBot);
+                        });
+                        break;
+                    case 'citocinese':
+                        membrane1.position.set(-2.5, 0, 0); membrane1.scale.set(0.7, 0.7, 0.7);
+                        membrane2.visible = true; membrane2.position.set(2.5, 0, 0); membrane2.scale.set(0.7, 0.7, 0.7);
+                        envelope1.visible = true; envelope1.position.set(-2.5, 0, 0); envelope1.scale.set(0.55, 0.55, 0.55);
+                        envelope2.visible = true; envelope2.position.set(2.5, 0, 0); envelope2.scale.set(0.55, 0.55, 0.55);
+                        break;
+                }
+            } else {
+                // MEIOSE LOGIC
+                switch(phase.id) {
+                    case 'profase1':
+                        fragEnvelopeGroup.visible = true;
+                        // Crossing over display: Recombinant double chromosomes
+                        const p1 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); p1.position.set(-0.8, 0, 0);
+                        const p2 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); p2.position.set(0.8, 0, 0);
+                        activeChromosomeContainer.add(p1); activeChromosomeContainer.add(p2);
+                        break;
+                    case 'metafase1':
+                        const m1 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); m1.position.set(-1.0, 0.8, 0);
+                        const m2 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); m2.position.set(1.0, 0.8, 0);
+                        const m3 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); m3.position.set(-1.0, -0.8, 0);
+                        const m4 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); m4.position.set(1.0, -0.8, 0);
+                        activeChromosomeContainer.add(m1); activeChromosomeContainer.add(m2); activeChromosomeContainer.add(m3); activeChromosomeContainer.add(m4);
+                        break;
+                    case 'anafase1':
+                        // ANAPHASE I: Whole double "X" chromosomes move to poles
+                        const a1 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); a1.position.set(-1.0, 2.5, 0);
+                        const a2 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); a2.position.set(1.0, 2.5, 0);
+                        const a3 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); a3.position.set(-1.0, -2.5, 0);
+                        const a4 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); a4.position.set(1.0, -2.5, 0);
+                        activeChromosomeContainer.add(a1); activeChromosomeContainer.add(a2); activeChromosomeContainer.add(a3); activeChromosomeContainer.add(a4);
+                        break;
+                    case 'telofase1':
+                        // 2 Daughter cells with visible DOUBLE chromosomes inside nuclei
+                        membrane1.position.set(-2.5, 0, 0); membrane1.scale.set(0.7, 0.7, 0.7);
+                        membrane2.visible = true; membrane2.position.set(2.5, 0, 0); membrane2.scale.set(0.7, 0.7, 0.7);
+                        
+                        envelope1.visible = true; envelope1.position.set(-2.5, 0, 0); envelope1.scale.set(0.5, 0.5, 0.5);
+                        envelope2.visible = true; envelope2.position.set(2.5, 0, 0); envelope2.scale.set(0.5, 0.5, 0.5);
+
+                        const t1 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); t1.position.set(-2.5, 0, 0); t1.scale.set(0.6,0.6,0.6);
+                        const t2 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); t2.position.set(2.5, 0, 0); t2.scale.set(0.6,0.6,0.6);
+                        activeChromosomeContainer.add(t1); activeChromosomeContainer.add(t2);
+                        break;
+                    case 'profase2':
+                    case 'metafase2':
+                        membrane1.position.set(-2.5, 0, 0); membrane1.scale.set(0.7, 0.7, 0.7);
+                        membrane2.visible = true; membrane2.position.set(2.5, 0, 0); membrane2.scale.set(0.7, 0.7, 0.7);
+                        
+                        const pr1 = createDoubleChromosome(COLOR_BLUE, COLOR_RED); pr1.position.set(-2.5, 0, 0); pr1.scale.set(0.65,0.65,0.65);
+                        const pr2 = createDoubleChromosome(COLOR_RED, COLOR_BLUE); pr2.position.set(2.5, 0, 0); pr2.scale.set(0.65,0.65,0.65);
+                        activeChromosomeContainer.add(pr1); activeChromosomeContainer.add(pr2);
+                        break;
+                    case 'anafase2':
+                        // ANAPHASE II: Chromatids in V separate in 2 cells
+                        membrane1.position.set(-2.5, 0, 0); membrane1.scale.set(0.7, 0.7, 0.7);
+                        membrane2.visible = true; membrane2.position.set(2.5, 0, 0); membrane2.scale.set(0.7, 0.7, 0.7);
+
+                        const topV1 = createSingleChromatidV(COLOR_BLUE, 1); topV1.position.set(-2.5, 1.6, 0); topV1.scale.set(0.65,0.65,0.65);
+                        const botV1 = createSingleChromatidV(COLOR_RED, -1); botV1.position.set(-2.5, -1.6, 0); botV1.scale.set(0.65,0.65,0.65);
+                        
+                        const topV2 = createSingleChromatidV(COLOR_RED, 1); topV2.position.set(2.5, 1.6, 0); topV2.scale.set(0.65,0.65,0.65);
+                        const botV2 = createSingleChromatidV(COLOR_BLUE, -1); botV2.position.set(2.5, -1.6, 0); botV2.scale.set(0.65,0.65,0.65);
+
+                        activeChromosomeContainer.add(topV1); activeChromosomeContainer.add(botV1);
+                        activeChromosomeContainer.add(topV2); activeChromosomeContainer.add(botV2);
+                        break;
+                    case 'telofase2':
+                    case 'citocinese2':
+                        // 4 Daughter cells haploid with visible SINGLE chromatids inside
+                        membrane1.visible = false;
+                        const positions = [
+                            new THREE.Vector3(-3.2, 2.2, 0),
+                            new THREE.Vector3(3.2, 2.2, 0),
+                            new THREE.Vector3(-3.2, -2.2, 0),
+                            new THREE.Vector3(3.2, -2.2, 0)
+                        ];
+                        const colors = [COLOR_BLUE, COLOR_RED, COLOR_BLUE, COLOR_RED];
+
+                        daughterMembranes.forEach((m, idx) => {
+                            m.visible = true;
+                            m.position.copy(positions[idx]);
+                            m.scale.set(0.48, 0.48, 0.48);
+
+                            const env = envelope1.clone();
+                            env.visible = true;
+                            env.position.copy(positions[idx]);
+                            env.scale.set(0.35, 0.35, 0.35);
+                            activeChromosomeContainer.add(env);
+
+                            const singleC = createSingleChromatidV(colors[idx], 1);
+                            singleC.position.copy(positions[idx]);
+                            singleC.scale.set(0.5, 0.5, 0.5);
+                            activeChromosomeContainer.add(singleC);
+                        });
+                        break;
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(cellGroup) cellGroup.rotation.y += 0.004;
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // UI Management
+        function initUI() {
+            document.getElementById('tab-mitosis').onclick = () => switchMode('mitosis');
+            document.getElementById('tab-meiosis').onclick = () => switchMode('meiosis');
+
+            document.getElementById('toggle-drawer-btn').onclick = toggleDrawer;
+            document.getElementById('close-drawer-btn').onclick = toggleDrawer;
+
+            document.getElementById('btn-prev').onclick = prevPhase;
+            document.getElementById('btn-next').onclick = nextPhase;
+            document.getElementById('btn-play').onclick = toggleAutoPlay;
+
+            document.getElementById('reset-cam-btn').onclick = () => {
+                camera.position.set(0, 0, 24);
+                controls.target.set(0, 0, 0);
+            };
+
+            document.getElementById('toggle-orbit-btn').onclick = () => {
+                controls.autoRotate = !controls.autoRotate;
+                document.getElementById('toggle-orbit-btn').classList.toggle('text-blue-400', controls.autoRotate);
+            };
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextPhase();
+                else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') prevPhase();
+                else if (e.key === ' ') { e.preventDefault(); toggleAutoPlay(); }
+            });
+
+            renderPhaseTimeline();
+            updateUI();
+        }
+
+        function switchMode(mode) {
+            if(currentMode === mode) return;
+            currentMode = mode;
+            currentPhaseIndex = 0;
+
+            const tabMitosis = document.getElementById('tab-mitosis');
+            const tabMeiosis = document.getElementById('tab-meiosis');
+
+            if(mode === 'mitosis') {
+                tabMitosis.className = 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-300 bg-blue-600 text-white shadow-md';
+                tabMeiosis.className = 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-300 text-slate-400 hover:text-white';
+            } else {
+                tabMeiosis.className = 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-300 bg-purple-600 text-white shadow-md';
+                tabMitosis.className = 'px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all duration-300 text-slate-400 hover:text-white';
+            }
+
+            renderPhaseTimeline();
+            updateUI();
+            updatePhase3D();
+        }
+
+        function renderPhaseTimeline() {
+            const container = document.getElementById('phase-buttons-container');
+            container.innerHTML = '';
+            const activeList = currentMode === 'mitosis' ? MITOSIS_PHASES : MEIOSIS_PHASES;
+
+            activeList.forEach((phase, idx) => {
+                const btn = document.createElement('button');
+                btn.className = `px-2.5 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+                    idx === currentPhaseIndex
+                        ? (currentMode === 'mitosis' ? 'bg-blue-600 text-white shadow-md scale-105' : 'bg-purple-600 text-white shadow-md scale-105')
+                        : 'bg-slate-800/70 hover:bg-slate-700 text-slate-300'
+                }`;
+                btn.innerText = phase.name;
+                btn.onclick = () => goToPhase(idx);
+                container.appendChild(btn);
+            });
+        }
+
+        function toggleDrawer() {
+            drawerOpen = !drawerOpen;
+            const drawer = document.getElementById('info-drawer');
+            if(drawerOpen) {
+                drawer.classList.remove('-translate-x-[115%]', 'opacity-0');
+                drawer.classList.add('translate-x-0', 'opacity-100');
+            } else {
+                drawer.classList.remove('translate-x-0', 'opacity-100');
+                drawer.classList.add('-translate-x-[115%]', 'opacity-0');
+            }
+        }
+
+        function goToPhase(index) {
+            currentPhaseIndex = index;
+            updateUI();
+            updatePhase3D();
+        }
+
+        function nextPhase() {
+            const activeList = currentMode === 'mitosis' ? MITOSIS_PHASES : MEIOSIS_PHASES;
+            currentPhaseIndex = (currentPhaseIndex < activeList.length - 1) ? currentPhaseIndex + 1 : 0;
+            goToPhase(currentPhaseIndex);
+        }
+
+        function prevPhase() {
+            if (currentPhaseIndex > 0) {
+                currentPhaseIndex--;
+                goToPhase(currentPhaseIndex);
+            }
+        }
+
+        function toggleAutoPlay() {
+            isAutoPlaying = !isAutoPlaying;
+            const playIcon = document.getElementById('play-icon');
+            const playText = document.getElementById('play-text');
+            const playBtn = document.getElementById('btn-play');
+
+            if (isAutoPlaying) {
+                playIcon.className = 'fa-solid fa-pause text-xs';
+                playText.innerText = 'Pausar';
+                playBtn.classList.remove('from-blue-600', 'to-indigo-600');
+                playBtn.classList.add('from-amber-600', 'to-orange-600');
+                autoPlayTimer = setInterval(nextPhase, 4500);
+            } else {
+                playIcon.className = 'fa-solid fa-play text-xs';
+                playText.innerText = 'Auto Reproduzir';
+                playBtn.classList.remove('from-amber-600', 'to-orange-600');
+                playBtn.classList.add('from-blue-600', 'to-indigo-600');
+                clearInterval(autoPlayTimer);
+            }
+        }
+
+        function updateUI() {
+            const activeList = currentMode === 'mitosis' ? MITOSIS_PHASES : MEIOSIS_PHASES;
+            const phase = activeList[currentPhaseIndex];
+
+            const buttonsContainer = document.getElementById('phase-buttons-container');
+            Array.from(buttonsContainer.children).forEach((btn, idx) => {
+                if (idx === currentPhaseIndex) {
+                    btn.className = `px-2.5 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+                        currentMode === 'mitosis' ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-purple-600 text-white shadow-lg scale-105'
+                    }`;
+                } else {
+                    btn.className = 'px-2.5 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 bg-slate-800/70 hover:bg-slate-700 text-slate-300';
+                }
+            });
+
+            const catBadge = document.getElementById('phase-category');
+            catBadge.innerText = phase.category;
+            catBadge.className = `px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                currentMode === 'mitosis' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+            }`;
+
+            document.getElementById('phase-step-indicator').innerText = `Etapa ${currentPhaseIndex + 1} / ${activeList.length}`;
+            document.getElementById('phase-title').innerText = phase.name;
+            document.getElementById('phase-subtitle').innerText = phase.subtitle;
+
+            const descContainer = document.getElementById('phase-description');
+            descContainer.innerHTML = phase.bulletPoints.map(pt => {
+                const formatted = pt.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-semibold">$1</strong>');
+                return `<div class="flex items-start gap-2">
+                    <i class="fa-solid fa-circle-dot text-[10px] ${currentMode === 'mitosis' ? 'text-blue-400' : 'text-purple-400'} mt-1.5 shrink-0"></i>
+                    <span>${formatted}</span>
+                </div>`;
+            }).join('');
+
+            document.getElementById('phase-highlight-text').innerText = phase.highlight;
+            document.getElementById('btn-prev').disabled = (currentPhaseIndex === 0);
+
+            document.getElementById('progress-percent').innerText = `${phase.progress}%`;
+            document.getElementById('progress-bar-fill').style.width = `${phase.progress}%`;
+        }
+
+        window.onload = () => {
+            init3D();
+            initUI();
+        };
+    </script>
+</body>
+</html>
